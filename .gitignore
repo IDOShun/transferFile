@@ -1,2 +1,3 @@
 credential_*.json
 token.json
+.env
