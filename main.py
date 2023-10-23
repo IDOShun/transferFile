@@ -8,7 +8,7 @@ import pytz
 
 # test
 import tempfile
-
+from tqdm import tqdm
 ##
 
 from googleapiclient.discovery import build
@@ -30,6 +30,7 @@ IS_MYDRIVE = False
 PROJECT_ID = os.getenv('PROJECT_ID')
 CREDENTIAL_GCS =  os.getenv('CREDENTIAL_GCS')
 BUCKET_NAME = os.getenv('BUCKET_NAME')
+DIR_PATH = os.getenv('DIR_PATH')
 
 CONTENT_TYPES = {
             "mp4" : "video/mp4", 
@@ -149,29 +150,41 @@ def upload(credential, bucket_name, drive_service, folder_id):
     blob = bkt.blob(object_name)
     blob.upload_from_file(archive, content_type='application/zip')
 
-def upload2(credential, bucket_name, drive_service, folder_id):
-    folder_list = getFoldersFromGDrive(drive_service, folder_id, "")
+def upload2(credential, bucket_name, drive_service, folder_id, min_file_date):
+    folder_list = getFoldersFromGDrive(drive_service, folder_id, min_file_date)
     for folder in folder_list :
         file_list = getFilesFromGDrive(drive_service, folder['id'], "")
-        with tempfile.TemporaryFile() as tmp_file:
-            with ZipFile(tmp_file, 'w') as zip_file:
-                for item in file_list:
-                    request = drive_service.files().get_media(fileId=item['id'])
-                    downloader = MediaIoBaseDownload(tmp_file, request)
-                    done = False
+        for item in file_list:
+            with tempfile.TemporaryFile() as tmp_file:
+                request = drive_service.files().get_media(fileId=item['id'])
+                downloader = MediaIoBaseDownload(tmp_file, request)
+                done = False
+                # Set up progress bar for downloading
+                with tqdm(total=100, desc=f"Downloading {item['name']}") as pbar:
                     while not done:
                         status, done = downloader.next_chunk()
-                        print(f"Downloaded {int(status.progress() * 100)}%.")
-                        # The data is now in tmp_file, so we can add it to our zip.
+                        pbar.update(status.progress() * 100 - pbar.n)
+
+                with ZipFile(tmp_file, 'w') as zip_file:
                     tmp_file.seek(0)
-                    zip_file.writestr(item['name'], tmp_file.read())
-                    tmp_file.seek(0, os.SEEK_END)  # Move the pointer to the end for the next download.
-            # Upload the temporary ZIP to Google Cloud Storage
-            tmp_file.seek(0)
-            storage_client = storage.Client.from_service_account_json(credential)
-            bkt = storage_client.bucket(bucket_name)
-            blob = bkt.blob(str(getCurrentTime('Asia/Tokyo'))+'.zip')
-            blob.upload_from_file(tmp_file, content_type='application/zip')
+                    print(f"{item['name']} is being zipped...")
+                    zip_file.writestr(folder['name']+'/'+item['name'], tmp_file.read())
+                    # tmp_file.seek(0, os.SEEK_END)  # Move the pointer to the end for the next download.
+                    print("zipping done.")
+
+                # Upload the temporary ZIP to Google Cloud Storage
+                tmp_file.seek(0)
+                storage_client = storage.Client.from_service_account_json(credential)
+                bkt = storage_client.bucket(bucket_name)
+                blob = bkt.blob(DIR_PATH+str(getCurrentTime('Asia/Tokyo'))+'.zip')
+
+
+                # Setup progress bar
+                print("transfering...")
+                tmp_file.seek(0)  # Ensure the file pointer is at the beginning
+                blob.upload_from_file(tmp_file, content_type='application/zip')
+                print("transfering done.")
+
 
 def getContentType(extension):
     for t in CONTENT_TYPES :
@@ -190,6 +203,6 @@ def getCurrentTime(timezone):
 # Main Operation Below
 if __name__ == '__main__':
     drive_service = authorizeApi(SCOPES, CREDENTIAL_OAUTH)
-    # upload2(CREDENTIAL_GCS, BUCKET_NAME, drive_service, FOLDER_ID)
+    upload2(CREDENTIAL_GCS, BUCKET_NAME, drive_service, FOLDER_ID, "20231021")
 
-    getFoldersFromGDrive(drive_service, FOLDER_ID, "20231010")
+    # getFoldersFromGDrive(drive_service, FOLDER_ID, "20231021")
