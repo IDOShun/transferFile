@@ -1,25 +1,20 @@
 import io
 import os
 from dotenv import load_dotenv
-import pathlib
-from zipfile import ZipFile, ZipInfo
+import zipfile
 from datetime import datetime
 import pytz
-
-# test
-import tempfile
 from tqdm import tqdm
-##
+
 
 from googleapiclient.discovery import build
 from httplib2 import Http
 from oauth2client import file, client, tools
 from googleapiclient.http import MediaIoBaseDownload
-
 from google.cloud import storage
 
 
-# Variables
+###### Variables ######
 load_dotenv("./.env")
 # drive
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
@@ -31,13 +26,7 @@ PROJECT_ID = os.getenv('PROJECT_ID')
 CREDENTIAL_GCS =  os.getenv('CREDENTIAL_GCS')
 BUCKET_NAME = os.getenv('BUCKET_NAME')
 DIR_PATH = os.getenv('DIR_PATH')
-
-CONTENT_TYPES = {
-            "mp4" : "video/mp4", 
-            "vtt" : "text/vtt",
-            "txt" : "text/plain; charset=utf-8",
-        }
-
+##########################
 
 def authorizeApi(scopes, credential_path):
     store = file.Storage('token.json')
@@ -50,7 +39,6 @@ def authorizeApi(scopes, credential_path):
 def getFoldersFromGDrive(drive_service ,folder_id, filter_by_mindate):
     filters = [
             f"'{folder_id}' in parents",
-            # f"name contains '{filter_by_foldername}'",
             "mimeType = 'application/vnd.google-apps.folder'",
         ]
     query = " and ".join(filters)
@@ -111,53 +99,36 @@ def getFilesFromGDrive(drive_service ,folder_id, filter_by_filename):
             print(f"{file['name']} ({file['id']})")
     return files_list
 
-def upload(credential_for_gcs, bucket_name, drive_service, folder_id, min_file_date):
-    folder_list = getFoldersFromGDrive(drive_service, folder_id, min_file_date)
-    for folder in folder_list:
-        archive = io.BytesIO()
-        with ZipFile(archive, 'w') as zip_archive:
-            files = getFilesFromGDrive(drive_service, folder['id'], "")
-            ## mp4 operation
+def makeArchiveOfAFolder(folder, drive_service):
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as zip_archive:
+        file_list = getFilesFromGDrive(drive_service, folder['id'], "")
+        archive_list = []
+        for index, file in enumerate(file_list):
             tmp = io.BytesIO()
-            downloader = MediaIoBaseDownload(tmp, drive_service.files().get_media(fileId=files[0]['id']))
+            downloader = MediaIoBaseDownload(tmp, drive_service.files().get_media(fileId=file['id']))
             done = False
-            # Set up progress bar for downloading
-            with tqdm(total=100, desc=f"Downloading {files[0]['name']}") as pbar:
+            # progress bar
+            with tqdm(total=100, desc=f"Downloading {file['name']}") as pbar:
                 while not done:
                     status, done = downloader.next_chunk()
                     pbar.update(status.progress() * 100 - pbar.n)
             tmp.seek(0)
-            print("archive")
-            mp4 = ZipInfo(files[0]['name'])
-            zip_archive.writestr(mp4, tmp.read())
-            print("done")
-            
-            ## vtt operation
-            tmp = io.BytesIO()
-            downloader = MediaIoBaseDownload(tmp, drive_service.files().get_media(fileId=files[1]['id']))
-            done = False
-            with tqdm(total=100, desc=f"Downloading {files[0]['name']}") as pbar:
-                while not done:
-                    status, done = downloader.next_chunk()
-                    pbar.update(status.progress() * 100 - pbar.n)
-            tmp.seek(0)
-            vtt = ZipInfo(files[1]['name'])
-            zip_archive.writestr(vtt, tmp.read())
-        archive.seek(0)
+            print("zipping...")
+            archive_list.append(zipfile.ZipInfo(file['name']))
+            zip_archive.writestr(archive_list[index], tmp.read())
+            print("zipping done.")
+    archive.seek(0)
+    return archive
 
+def upload(credential_for_gcs, bucket_name, archive):
+        archive.seek(0)
         storage_client = storage.Client.from_service_account_json(credential_for_gcs)
         bkt = storage_client.bucket(bucket_name)
         blob = bkt.blob(str(getCurrentTime('Asia/Tokyo'))+'.zip')
-        print("uploading")
+        print("uploading to gcs...")
         blob.upload_from_file(archive, content_type='application/zip')
-        print("done")
-
-def getContentType(extension):
-    for t in CONTENT_TYPES :
-        if t == extension :
-            return CONTENT_TYPES.get(t)
-    print("extension is not set")
-    return None
+        print("done.")
 
 def getCurrentTime(timezone):
     # Get the UTC+9 (Japan) timezone
@@ -169,4 +140,7 @@ def getCurrentTime(timezone):
 # Main Operation Below
 if __name__ == '__main__':
     drive_service = authorizeApi(SCOPES, CREDENTIAL_OAUTH)
-    upload(CREDENTIAL_GCS, BUCKET_NAME, drive_service, FOLDER_ID, "20231029")
+    folder_list = getFoldersFromGDrive(drive_service, FOLDER_ID, "20231030")
+    for folder in folder_list:
+        archive = makeArchiveOfAFolder(folder, drive_service)
+        upload(CREDENTIAL_GCS, BUCKET_NAME, archive)
