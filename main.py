@@ -54,7 +54,6 @@ def getFoldersFromGDrive(drive_service ,folder_id, filter_by_mindate):
             "mimeType = 'application/vnd.google-apps.folder'",
         ]
     query = " and ".join(filters)
-
     folders = drive_service.files().list(
         q=query,
         spaces= "drive",
@@ -63,19 +62,29 @@ def getFoldersFromGDrive(drive_service ,folder_id, filter_by_mindate):
         fields='nextPageToken, files(id, name)'
         ).execute()
     folders_list = folders.get('files', [])
-    folders_list2 = []
-    for folder in folders_list:
-        if folder['name'] >= filter_by_mindate:
-            folders_list2.append({'id' : folder['id'], 'name' : folder['name']})
-
-
     if not folders_list:
         print(f'No folders found in folder with ID {folder_id}.')
+        return
+
+    # Debug ##############################################
+    # for folder in folders_list:
+    #     print(f"{folder['name']} ({folder['id']})")
+    ######################################################
+
+    if filter_by_mindate != "":
+        folders_filtered = []
+        for folder in folders_list:
+            if folder['name'] >= filter_by_mindate:
+                folders_filtered.append({'id' : folder['id'], 'name' : folder['name']})
+
+        # Debug ##############################################
+        # for folder in folders_filtered:
+        #     print(f"{folder['name']} ({folder['id']})")
+        ######################################################
+
+        return folders_filtered
     else:
-        print(f"Folders in the folder with ID {folder_id}:")
-        for folder in folders_list2:
-            print(f"{folder['name']} ({folder['id']})")
-    return folders_list2
+        return folders_list
 
 def getFilesFromGDrive(drive_service ,folder_id, filter_by_filename):
     filters = [
@@ -102,89 +111,46 @@ def getFilesFromGDrive(drive_service ,folder_id, filter_by_filename):
             print(f"{file['name']} ({file['id']})")
     return files_list
 
-def uploadFilesToGCS(file_name, file_id, credential, bucket_name, drive_service):
-    request = drive_service.files().get_media(fileId=file_id)
-    file_stream = io.BytesIO()
-    downloader = MediaIoBaseDownload(file_stream, request)
-    done = False
-    while not done:
-        _, done = downloader.next_chunk()
-    file_stream.seek(0)
-
-    # Upload file stream to Google Cloud Storage
-    storage_client = storage.Client.from_service_account_json(credential)
-    bkt = storage_client.bucket(bucket_name)
-    blob = bkt.blob(file_name)
-    print(f"uploading {file_name}... It may take long time.\n")
-    # Get file extension
-    _, ext = os.path.splitext(file_name)
-    blob.upload_from_file(file_stream, content_type=getContentType(ext[1:]),timeout=600)
-
-    print(f"File from Google Drive uploaded to GCS at: gs://{bucket_name}/{file_name}")
-
-
-
-def upload(credential, bucket_name, drive_service, folder_id):
-    folders_list = getFoldersFromGDrive(drive_service, folder_id, "")
-    archive = io.BytesIO()
-    with ZipFile(archive, 'w') as zip_archive:
-        for folder in folders_list:
-            files = getFilesFromGDrive(drive_service, folder['id'], "")
-            for file in files:
-                print("start")
-                downloader = MediaIoBaseDownload(archive, drive_service.files().get_media(fileId=file['id']))
-                done = False
-                while not done:
-                    _, done = downloader.next_chunk()
-            archive.seek(0)
-            object_name = str(getCurrentTime('Asia/Tokyo'))+'.zip'
-            zip_entry_name = object_name
-            zip_file = ZipInfo(zip_entry_name)
-            file_data = archive.read()
-            zip_archive.writestr(zip_file, file_data)
-    archive.seek(0)
-
-
-    storage_client = storage.Client.from_service_account_json(credential)
-    bkt = storage_client.bucket(bucket_name)
-    blob = bkt.blob(object_name)
-    blob.upload_from_file(archive, content_type='application/zip')
-
-def upload2(credential, bucket_name, drive_service, folder_id, min_file_date):
+def upload(credential_for_gcs, bucket_name, drive_service, folder_id, min_file_date):
     folder_list = getFoldersFromGDrive(drive_service, folder_id, min_file_date)
-    for folder in folder_list :
-        file_list = getFilesFromGDrive(drive_service, folder['id'], "")
-        for item in file_list:
-            with tempfile.TemporaryFile() as tmp_file:
-                request = drive_service.files().get_media(fileId=item['id'])
-                downloader = MediaIoBaseDownload(tmp_file, request)
-                done = False
-                # Set up progress bar for downloading
-                with tqdm(total=100, desc=f"Downloading {item['name']}") as pbar:
-                    while not done:
-                        status, done = downloader.next_chunk()
-                        pbar.update(status.progress() * 100 - pbar.n)
+    for folder in folder_list:
+        archive = io.BytesIO()
+        with ZipFile(archive, 'w') as zip_archive:
+            files = getFilesFromGDrive(drive_service, folder['id'], "")
+            ## mp4 operation
+            tmp = io.BytesIO()
+            downloader = MediaIoBaseDownload(tmp, drive_service.files().get_media(fileId=files[0]['id']))
+            done = False
+            # Set up progress bar for downloading
+            with tqdm(total=100, desc=f"Downloading {files[0]['name']}") as pbar:
+                while not done:
+                    status, done = downloader.next_chunk()
+                    pbar.update(status.progress() * 100 - pbar.n)
+            tmp.seek(0)
+            print("archive")
+            mp4 = ZipInfo(files[0]['name'])
+            zip_archive.writestr(mp4, tmp.read())
+            print("done")
+            
+            ## vtt operation
+            tmp = io.BytesIO()
+            downloader = MediaIoBaseDownload(tmp, drive_service.files().get_media(fileId=files[1]['id']))
+            done = False
+            with tqdm(total=100, desc=f"Downloading {files[0]['name']}") as pbar:
+                while not done:
+                    status, done = downloader.next_chunk()
+                    pbar.update(status.progress() * 100 - pbar.n)
+            tmp.seek(0)
+            vtt = ZipInfo(files[1]['name'])
+            zip_archive.writestr(vtt, tmp.read())
+        archive.seek(0)
 
-                with ZipFile(tmp_file, 'w') as zip_file:
-                    tmp_file.seek(0)
-                    print(f"{item['name']} is being zipped...")
-                    zip_file.writestr(folder['name']+'/'+item['name'], tmp_file.read())
-                    # tmp_file.seek(0, os.SEEK_END)  # Move the pointer to the end for the next download.
-                    print("zipping done.")
-
-                # Upload the temporary ZIP to Google Cloud Storage
-                tmp_file.seek(0)
-                storage_client = storage.Client.from_service_account_json(credential)
-                bkt = storage_client.bucket(bucket_name)
-                blob = bkt.blob(DIR_PATH+str(getCurrentTime('Asia/Tokyo'))+'.zip')
-
-
-                # Setup progress bar
-                print("transfering...")
-                tmp_file.seek(0)  # Ensure the file pointer is at the beginning
-                blob.upload_from_file(tmp_file, content_type='application/zip')
-                print("transfering done.")
-
+        storage_client = storage.Client.from_service_account_json(credential_for_gcs)
+        bkt = storage_client.bucket(bucket_name)
+        blob = bkt.blob(str(getCurrentTime('Asia/Tokyo'))+'.zip')
+        print("uploading")
+        blob.upload_from_file(archive, content_type='application/zip')
+        print("done")
 
 def getContentType(extension):
     for t in CONTENT_TYPES :
@@ -203,6 +169,4 @@ def getCurrentTime(timezone):
 # Main Operation Below
 if __name__ == '__main__':
     drive_service = authorizeApi(SCOPES, CREDENTIAL_OAUTH)
-    upload2(CREDENTIAL_GCS, BUCKET_NAME, drive_service, FOLDER_ID, "20231021")
-
-    # getFoldersFromGDrive(drive_service, FOLDER_ID, "20231021")
+    upload(CREDENTIAL_GCS, BUCKET_NAME, drive_service, FOLDER_ID, "20231029")
