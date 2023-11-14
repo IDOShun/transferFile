@@ -129,10 +129,9 @@ def makeArchiveOfAFolder(folder, drive_service):
                 # when file is exist in specified directory in a temp directory
                 if filenames:
                     dir_name = dir_path.split('/')[-1]
-                    print(dir_name)
                     for file_name in filenames:
                         file_path = os.path.join(dir_name, file_name)
-                        zipf.write(os.path.join(tmp_dir, file_path), os.path.join(getCurrentTime(), file_path))
+                        zipf.write(os.path.join(tmp_dir, file_path), file_path)
         print("done.")
         zip_buffer.seek(0)
         return zip_buffer
