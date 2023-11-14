@@ -107,7 +107,6 @@ def makeArchiveOfAFolder(folder, drive_service):
         dir_name = folder['name']
         for file in file_list:
             file_io = io.BytesIO()
-            # downloader = MediaIoBaseDownload(file_io, drive_service.files().get_media(fileId="1oiouII3u4ZyA0tPr8LGAqc-aVVi5Tg6L"))
             downloader = MediaIoBaseDownload(file_io, drive_service.files().get_media(fileId=file['id']))
             done = False
             # progress bar
@@ -133,40 +132,30 @@ def makeArchiveOfAFolder(folder, drive_service):
                     print(dir_name)
                     for file_name in filenames:
                         file_path = os.path.join(dir_name, file_name)
-                        zipf.write(os.path.join(tmp_dir, file_path), os.path.join('createddate', file_path))
+                        zipf.write(os.path.join(tmp_dir, file_path), os.path.join(getCurrentTime(), file_path))
         print("done.")
         zip_buffer.seek(0)
         return zip_buffer
 
-def upload(credential_for_gcs, bucket_name, archive):
+def upload(credential_for_gcs, bucket_name, archive, dirpath=''):
     archive.seek(0)
     storage_client = storage.Client.from_service_account_json(credential_for_gcs)
     bkt = storage_client.bucket(bucket_name)
-    # blob = bkt.blob(DIR_PATH+str(getCurrentTime('Asia/Tokyo'))+'.zip')
-    # blob = bkt.blob(DIR_PATH+'test.zip')
-    blob = bkt.blob('test.zip')
+    blob = bkt.blob(str(dirpath)+str(getCurrentTime())+'.zip')
     print("uploading to gcs...")
     blob.upload_from_file(archive, content_type='application/zip')
     print("done.")
 
-def getCurrentTime(timezone):
-    # Get the UTC+9 (Japan) timezone
-    japan_tz = pytz.timezone(timezone)
-    # Get the current time in UTC+
-    d = datetime.now(japan_tz)
-    return d.strftime('%Y%m%d%H%M%S')
-
+def getCurrentTime(timezone='Asia/Tokyo'):
+    '''
+    Default timezone is set to Japan (UTC+9)
+    '''
+    return datetime.now(pytz.timezone(timezone)).strftime('%Y%m%d%H%M%S%f')
 
 # Main Operation Below
 if __name__ == '__main__':
-    # drive_service = authorizeApi(SCOPES, CREDENTIAL_OAUTH)
-    # folder_list = getFoldersFromGDrive(drive_service, FOLDER_ID, "20231105")
-    # for folder in folder_list:
-    #     archive = makeArchiveOfAFolder(folder, drive_service)
-    #     upload(CREDENTIAL_GCS, BUCKET_NAME, archive)
-    
     drive_service = authorizeApi(SCOPES, CREDENTIAL_OAUTH)
-    folder_list = getFoldersFromGDrive(drive_service, FOLDER_ID, "20231113")
+    folder_list = getFoldersFromGDrive(drive_service, FOLDER_ID, "20231111")
     for folder in folder_list:
         archive = makeArchiveOfAFolder(folder, drive_service)
         upload(CREDENTIAL_GCS, BUCKET_NAME, archive)
