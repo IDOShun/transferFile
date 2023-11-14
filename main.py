@@ -4,7 +4,9 @@ from dotenv import load_dotenv
 import zipfile
 from datetime import datetime
 import pytz
-from tqdm import tqdm
+from tqdm import tqdm # for progress bar
+import tempfile
+import shutil
 
 
 from googleapiclient.discovery import build
@@ -25,7 +27,7 @@ IS_MYDRIVE = False
 PROJECT_ID = os.getenv('PROJECT_ID')
 CREDENTIAL_GCS =  os.getenv('CREDENTIAL_GCS')
 BUCKET_NAME = os.getenv('BUCKET_NAME')
-DIR_PATH = os.getenv('DIR_PATH')
+# DIR_PATH = os.getenv('DIR_PATH')
 ##########################
 
 def authorizeApi(scopes, credential_path):
@@ -100,47 +102,71 @@ def getFilesFromGDrive(drive_service ,folder_id, filter_by_filename):
     return files_list
 
 def makeArchiveOfAFolder(folder, drive_service):
-    archive = io.BytesIO()
-    with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as zip_archive:
+    with tempfile.TemporaryDirectory() as tmp_dir:
         file_list = getFilesFromGDrive(drive_service, folder['id'], "")
-        archive_list = []
-        for index, file in enumerate(file_list):
-            tmp = io.BytesIO()
-            downloader = MediaIoBaseDownload(tmp, drive_service.files().get_media(fileId=file['id']))
+        dir_name = folder['name']
+        for file in file_list:
+            file_io = io.BytesIO()
+            # downloader = MediaIoBaseDownload(file_io, drive_service.files().get_media(fileId="1oiouII3u4ZyA0tPr8LGAqc-aVVi5Tg6L"))
+            downloader = MediaIoBaseDownload(file_io, drive_service.files().get_media(fileId=file['id']))
             done = False
             # progress bar
             with tqdm(total=100, desc=f"Downloading {file['name']}") as pbar:
                 while not done:
                     status, done = downloader.next_chunk()
                     pbar.update(status.progress() * 100 - pbar.n)
-            tmp.seek(0)
-            print("zipping...")
-            archive_list.append(zipfile.ZipInfo(file['name']))
-            zip_archive.writestr(archive_list[index], tmp.read())
-            print("zipping done.")
-    archive.seek(0)
-    return archive
+            file_io.seek(0)
+            os.makedirs(os.path.join(tmp_dir, dir_name), exist_ok=True)
+            file_path = os.path.join(tmp_dir, dir_name, file['name'])
+            # copy file
+            with open(file_path, 'wb') as temp_file:
+                temp_file.write(file_io.read())
+
+        # Create a BytesIO object to store the ZIP file
+        zip_buffer = io.BytesIO()
+        print("creating archive...")
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for dir_path, dirnames, filenames in os.walk(tmp_dir):
+                # when file is exist in specified directory in a temp directory
+                if filenames:
+                    dir_name = dir_path.split('/')[-1]
+                    print(dir_name)
+                    for file_name in filenames:
+                        file_path = os.path.join(dir_name, file_name)
+                        zipf.write(os.path.join(tmp_dir, file_path), os.path.join('createddate', file_path))
+        print("done.")
+        zip_buffer.seek(0)
+        return zip_buffer
 
 def upload(credential_for_gcs, bucket_name, archive):
-        archive.seek(0)
-        storage_client = storage.Client.from_service_account_json(credential_for_gcs)
-        bkt = storage_client.bucket(bucket_name)
-        blob = bkt.blob(str(getCurrentTime('Asia/Tokyo'))+'.zip')
-        print("uploading to gcs...")
-        blob.upload_from_file(archive, content_type='application/zip')
-        print("done.")
+    archive.seek(0)
+    storage_client = storage.Client.from_service_account_json(credential_for_gcs)
+    bkt = storage_client.bucket(bucket_name)
+    # blob = bkt.blob(DIR_PATH+str(getCurrentTime('Asia/Tokyo'))+'.zip')
+    # blob = bkt.blob(DIR_PATH+'test.zip')
+    blob = bkt.blob('test.zip')
+    print("uploading to gcs...")
+    blob.upload_from_file(archive, content_type='application/zip')
+    print("done.")
 
 def getCurrentTime(timezone):
     # Get the UTC+9 (Japan) timezone
     japan_tz = pytz.timezone(timezone)
-    # Get the current time in UTC+9
-    return datetime.now(japan_tz)
+    # Get the current time in UTC+
+    d = datetime.now(japan_tz)
+    return d.strftime('%Y%m%d%H%M%S')
 
 
 # Main Operation Below
 if __name__ == '__main__':
+    # drive_service = authorizeApi(SCOPES, CREDENTIAL_OAUTH)
+    # folder_list = getFoldersFromGDrive(drive_service, FOLDER_ID, "20231105")
+    # for folder in folder_list:
+    #     archive = makeArchiveOfAFolder(folder, drive_service)
+    #     upload(CREDENTIAL_GCS, BUCKET_NAME, archive)
+    
     drive_service = authorizeApi(SCOPES, CREDENTIAL_OAUTH)
-    folder_list = getFoldersFromGDrive(drive_service, FOLDER_ID, "20231030")
+    folder_list = getFoldersFromGDrive(drive_service, FOLDER_ID, "20231113")
     for folder in folder_list:
         archive = makeArchiveOfAFolder(folder, drive_service)
         upload(CREDENTIAL_GCS, BUCKET_NAME, archive)
