@@ -7,6 +7,7 @@ import pytz
 from tqdm import tqdm # for progress bar
 import tempfile
 import shutil
+import sys
 
 
 from googleapiclient.discovery import build
@@ -27,7 +28,9 @@ IS_MYDRIVE = False
 PROJECT_ID = os.getenv('PROJECT_ID')
 CREDENTIAL_GCS =  os.getenv('CREDENTIAL_GCS')
 BUCKET_NAME = os.getenv('BUCKET_NAME')
-# DIR_PATH = os.getenv('DIR_PATH')
+DIR_PATH = os.getenv('DIR_PATH')
+
+DATE_FROM = str(sys.argv[1])
 ##########################
 
 def authorizeApi(scopes, credential_path):
@@ -131,7 +134,7 @@ def makeArchiveOfAFolder(folder, drive_service):
                     dir_name = dir_path.split('/')[-1]
                     for file_name in filenames:
                         file_path = os.path.join(dir_name, file_name)
-                        zipf.write(os.path.join(tmp_dir, file_path), file_path)
+                        zipf.write(os.path.join(tmp_dir, file_path), os.path.join(file_path))
         print("done.")
         zip_buffer.seek(0)
         return zip_buffer
@@ -154,7 +157,7 @@ def getCurrentTime(timezone='Asia/Tokyo'):
 # Main Operation Below
 if __name__ == '__main__':
     drive_service = authorizeApi(SCOPES, CREDENTIAL_OAUTH)
-    folder_list = getFoldersFromGDrive(drive_service, FOLDER_ID, "20231111")
+    folder_list = getFoldersFromGDrive(drive_service, FOLDER_ID, DATE_FROM)
     for folder in folder_list:
         archive = makeArchiveOfAFolder(folder, drive_service)
-        upload(CREDENTIAL_GCS, BUCKET_NAME, archive)
+        upload(CREDENTIAL_GCS, BUCKET_NAME, archive, DIR_PATH)
