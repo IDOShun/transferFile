@@ -75,7 +75,11 @@ def getFoldersFromGDrive(drive_service ,folder_id, filter_by_mindate):
         #     print(f"{folder['name']} ({folder['id']})")
         ######################################################
 
-        return folders_filtered
+        folders_reversed = []
+        for i in reversed(range(len(folders_filtered))):
+            folders_reversed.append({'id' : folders_filtered[i]['id'], 'name' : folders_filtered[i]['name']})
+
+        return folders_reversed
     else:
         return folders_list
 
