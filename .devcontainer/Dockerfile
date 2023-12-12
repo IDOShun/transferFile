@@ -1,4 +1,4 @@
-FROM --platform=linux/arm64/v8 debian:trixie-20231120-slim
+FROM --platform=linux/arm64/v8 debian:bullseye-slim
 
 ARG USERNAME=vscode
 ARG GROUPNAME=developer
