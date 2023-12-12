@@ -1,2 +1,5 @@
 *.json
 .env
+.vscode-server
+.gitconfig
+.bash_history
