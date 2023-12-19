@@ -3,3 +3,5 @@
 .vscode-server
 .gitconfig
 .bash_history
+.cache
+.local
